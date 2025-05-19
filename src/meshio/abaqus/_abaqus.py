@@ -121,6 +121,8 @@ def read_buffer(f):
     point_data = {}
     point_ids = None
     info = {}
+    material = None
+    step = 0
 
     line = f.readline()
     while True:
@@ -197,6 +199,82 @@ def read_buffer(f):
             params_map = get_param_map(line)
             set_ids, _, line = _read_surface(f, params_map, point_ids)
             point_sets[params_map["NAME"]] = set_ids
+        elif keyword == "MATERIAL":
+            params_map = get_param_map(line)
+            material_name = params_map["NAME"]
+            material = info.setdefault("materials", {}).setdefault(material_name, {})
+            line = f.readline()
+        elif keyword == "DENSITY":
+            line = f.readline()
+            material["density"] = float(line.strip().split(",")[0])
+            line = f.readline()
+        elif keyword == "ELASTIC":
+            params_map = get_param_map(line)
+            material["elastic_type"] = params_map["TYPE"]
+
+            line = f.readline().split(",")
+            material["E"] = float(line[0].strip())
+            material["nu"] = float(line[1].strip())
+            line = f.readline()
+        elif keyword == "PLASTIC":
+            params_map = get_param_map(line)
+            material["plastic_hardening"] = params_map["HARDENING"]
+
+            lookup = []
+            while True:
+                line = f.readline()
+                if not line or line.startswith("*"):
+                    break
+                if line.strip() == "":
+                    continue
+                stress, strain, _ = line.split(",")
+                lookup.append((float(stress.strip()), float(strain.strip())))
+            material["plastic_data"] = lookup
+        elif keyword == "SOLID SECTION":
+            params_map = get_param_map(line)
+            info.setdefault("solids", {})[params_map["ELSET"]] = params_map["MATERIAL"]
+            line = f.readline()
+        elif keyword == "STEP":
+            params_map = get_param_map(line)
+            step += 1
+            step_info = {
+                "name": params_map["NAME"],
+                "nlgeom": params_map["NLGEOM"],
+            }
+            info.setdefault("steps", []).append(step_info)
+            line = f.readline()
+        elif keyword == "CLOAD":
+            params_map = get_param_map(line)
+            if params_map.get("OP") != "NEW" and step > 1:
+                loads = info["steps"][-2]["load"].copy()
+                step_info["load"] = loads
+            else:
+                loads = step_info.setdefault("load", [])
+            while True:
+                line = f.readline()
+                if not line or line.startswith("*"):
+                    break
+                if line.strip() == "":
+                    continue
+                node_set, dof, mag = line.split(",")
+                params = info.get("parameters", {}).copy()
+                mag = eval(mag.strip().replace("<", "").replace(">", ""), params)
+                loads.append({
+                    "nset": node_set,
+                    "dof": dof,
+                    "magnitude": mag,
+                })
+        elif keyword == "PARAMETER":
+            info["parameters"] = {}
+            while True:
+                line = f.readline()
+                if not line or line.startswith("*"):
+                    break
+                if line.strip() == "":
+                    continue
+                lhs, rhs = line.split("=")
+                rhs_eval = eval(rhs, info["parameters"].copy())
+                info["parameters"][lhs] = rhs_eval
         elif keyword == "INCLUDE":
             # Splitting line to get external input file path (example: *INCLUDE,INPUT=wInclude_bulk.inp)
             ext_input_file = pathlib.Path(line.split("=")[-1].strip())
@@ -209,7 +287,7 @@ def read_buffer(f):
 
             # Merge contents of external file only if it is containing mesh data
             if len(out.points) > 0:
-                points, cells = merge(
+                points, cells, info = merge(
                     out,
                     points,
                     cells,
@@ -218,6 +296,7 @@ def read_buffer(f):
                     field_data,
                     point_sets,
                     cell_sets,
+                    info,
                 )
 
             line = f.readline()
@@ -330,7 +409,7 @@ def _read_surface(f, params_map, point_ids):
         
 
 def merge(
-    mesh, points, cells, point_data, cell_data, field_data, point_sets, cell_sets
+    mesh, points, cells, point_data, cell_data, field_data, point_sets, cell_sets, info
 ):
     """
     Merge Mesh object into existing containers for points, cells, sets, etc..
@@ -362,11 +441,9 @@ def merge(
         cells.append(CellBlock(c.type, new_data))
         cnt += 1
 
-    # The following aren't currently included in the abaqus parser, and are therefore
-    # excluded?
-    # point_data.update(mesh.point_data)
-    # cell_data.update(mesh.cell_data)
-    # field_data.update(mesh.field_data)
+    point_data.update(mesh.point_data)
+    cell_data.update(mesh.cell_data)
+    field_data.update(mesh.field_data)
 
     # Update point and cell sets to account for change in cell and point ids
     for key, val in mesh.point_sets.items():
@@ -377,7 +454,9 @@ def merge(
     # for key, val in mesh.cell_sets.items():
     #     cell_sets[key] = cellblockref + [np.array([x for x in val[0]])]
 
-    return points, cells
+    info.update(mesh.info)
+
+    return points, cells, info
 
 
 def get_param_map(word, required_keys=None):
