@@ -319,7 +319,7 @@ class Mesh:
             for name, c in self.cell_sets.items():
                 boolfun = []
                 for k, cc in enumerate(c):
-                    arr = np.zeros(len(self.cells[k]), dtype=bool)
+                    arr = np.zeros(len(self.cells[k]), dtype=int)
                     arr[cc] = True
                     boolfun.append(arr)
                 self.cell_data[name] = boolfun
@@ -358,7 +358,7 @@ class Mesh:
         if join_char is None and data_name is None:
             # Convert each point set to bool encoding
             for name, c in self.point_sets.items():
-                arr = np.zeros(len(self.points), dtype=bool)
+                arr = np.zeros(len(self.points), dtype=int)
                 arr[c] = True
                 self.point_data[name] = arr
             self.point_sets = {}
