@@ -313,7 +313,19 @@ class Mesh:
         warn("meshio.Mesh.read is deprecated, use meshio.read instead")
         return read(path_or_buf, file_format)
 
-    def cell_sets_to_data(self, data_name: str | None = None):
+    def cell_sets_to_data(self, join_char: str = "-", data_name: str | None = None) -> None:
+        if join_char is None and data_name is None:
+            # Convert each cell set to bool encoding
+            for name, c in self.cell_sets.items():
+                boolfun = []
+                for k, cc in enumerate(c):
+                    arr = np.zeros(len(self.cells[k]), dtype=bool)
+                    arr[cc] = True
+                    boolfun.append(arr)
+                self.cell_data[name] = boolfun
+            self.cell_sets = {}
+            return
+
         # If possible, convert cell sets to integer cell data. This is possible if all
         # cells appear exactly in one group.
         default_value = -1
@@ -338,11 +350,20 @@ class Mesh:
                     break
 
             if data_name is None:
-                data_name = "-".join(self.cell_sets.keys())
+                data_name = join_char.join(self.cell_sets.keys())
             self.cell_data[data_name] = intfun
             self.cell_sets = {}
 
-    def point_sets_to_data(self, join_char: str = "-") -> None:
+    def point_sets_to_data(self, join_char: str = "-", data_name: str | None = None) -> None:
+        if join_char is None and data_name is None:
+            # Convert each point set to bool encoding
+            for name, c in self.point_sets.items():
+                arr = np.zeros(len(self.points), dtype=bool)
+                arr[c] = True
+                self.point_data[name] = arr
+            self.point_sets = {}
+            return
+
         # now for the point sets
         # Go for -1 as the default value. (NaN is not int.)
         default_value = -1
@@ -357,7 +378,8 @@ class Mesh:
                     f"Using default value {default_value}."
                 )
 
-            data_name = join_char.join(self.point_sets.keys())
+            if data_name is None:
+                data_name = join_char.join(self.point_sets.keys())
             self.point_data[data_name] = intfun
             self.point_sets = {}
 
