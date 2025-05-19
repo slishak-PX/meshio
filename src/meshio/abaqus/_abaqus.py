@@ -115,8 +115,7 @@ def read_buffer(f):
     cell_ids = []
     point_sets = {}
     cell_sets = {}
-    cell_sets_element = {}  # Handle cell sets defined in ELEMENT
-    cell_sets_element_order = []  # Order of keys is not preserved in Python 3.5
+    cell_sets_element = []
     field_data = {}
     cell_data = {}
     point_data = {}
@@ -145,8 +144,7 @@ def read_buffer(f):
             cells.append(CellBlock(cell_type, cells_data))
             cell_ids.append(ids)
             if sets:
-                cell_sets_element.update(sets)
-                cell_sets_element_order += list(sets.keys())
+                cell_sets_element.extend([(key, val) for key, val in sets.items()])
         elif keyword == "NSET":
             params_map = get_param_map(line, required_keys=["NSET"])
             set_ids, _, line = _read_set(f, params_map)
@@ -174,10 +172,14 @@ def read_buffer(f):
                 for set_name in set_names:
                     if set_name in cell_sets.keys():
                         cell_sets[name].append(cell_sets[set_name])
-                    elif set_name in cell_sets_element.keys():
-                        cell_sets[name].append(cell_sets_element[set_name])
                     else:
-                        raise ReadError(f"Unknown cell set '{set_name}'")
+                        # TODO check logic
+                        for elset_name, data in cell_sets_element:
+                            if name == elset_name:
+                                cell_sets[name].append(data)
+                                break
+                        else:
+                            raise ReadError(f"Unknown cell set '{set_name}'")
         elif keyword == "INCLUDE":
             # Splitting line to get external input file path (example: *INCLUDE,INPUT=wInclude_bulk.inp)
             ext_input_file = pathlib.Path(line.split("=")[-1].strip())
@@ -207,16 +209,15 @@ def read_buffer(f):
             line = f.readline()
 
     # Parse cell sets defined in ELEMENT
-    for i, name in enumerate(cell_sets_element_order):
-        # Not sure whether this case would ever happen
+    for i, (name, data) in enumerate(cell_sets_element):
         if name in cell_sets.keys():
-            cell_sets[name][i] = cell_sets_element[name]
+            if cell_sets[name][i].size != 0:
+                raise ReadError("Incorrect cell set definition")
+            cell_sets[name][i] = data
         else:
-            cell_sets[name] = []
-            for ic in range(len(cells)):
-                cell_sets[name].append(
-                    cell_sets_element[name] if i == ic else np.array([], dtype="int32")
-                )
+            cell_sets[name] = [
+                data if i == ic else np.array([], dtype="int32") for ic in range(len(cells))
+            ]
 
     return Mesh(
         points,
