@@ -120,6 +120,7 @@ def read_buffer(f):
     cell_data = {}
     point_data = {}
     point_ids = None
+    info = {}
 
     line = f.readline()
     while True:
@@ -180,6 +181,22 @@ def read_buffer(f):
                                 break
                         else:
                             raise ReadError(f"Unknown cell set '{set_name}'")
+        elif keyword == "COUPLING":
+            params_map = get_param_map(line)
+            constraint_type = f.readline().strip()[1:]
+            constraint_params = f.readline().strip()
+            constraints = info.setdefault("constraints", {})
+            constraints[params_map["CONSTRAINT NAME"]] = {
+                "surface": params_map["SURFACE"],
+                "ref_node": point_ids[int(params_map["REF NODE"])],
+                "constraint_type": constraint_type,
+                "constraint_params": [int(x) for x in constraint_params.split(",")],
+            }
+            line = f.readline()
+        elif keyword == "SURFACE":
+            params_map = get_param_map(line)
+            set_ids, _, line = _read_surface(f, params_map, point_ids)
+            point_sets[params_map["NAME"]] = set_ids
         elif keyword == "INCLUDE":
             # Splitting line to get external input file path (example: *INCLUDE,INPUT=wInclude_bulk.inp)
             ext_input_file = pathlib.Path(line.split("=")[-1].strip())
@@ -227,6 +244,7 @@ def read_buffer(f):
         field_data=field_data,
         point_sets=point_sets,
         cell_sets=cell_sets,
+        info=info,
     )
 
 
@@ -285,6 +303,31 @@ def _read_cells(f, params_map, point_ids):
 
     return cell_type, cells, cell_ids, cell_sets, line
 
+
+def _read_surface(f, params_map, point_ids):
+
+    points = []
+    weights = []
+    while True:
+        line = f.readline()
+        if not line or line.startswith("*"):
+            break
+        if line.strip() == "":
+            continue
+
+        point_id, weight = line.split(",")
+        points.append(point_ids[int(point_id)])
+        weights.append(float(weight))
+
+    if params_map["TYPE"] == "NODE":
+        points = np.array(points, dtype="int32")
+        weights = np.array(weights, dtype=float)
+    else:
+        points = None
+        weights = None
+
+    return points, weights, line
+        
 
 def merge(
     mesh, points, cells, point_data, cell_data, field_data, point_sets, cell_sets
