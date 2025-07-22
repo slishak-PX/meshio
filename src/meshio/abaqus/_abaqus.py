@@ -280,7 +280,7 @@ def read_buffer(f):
             ext_input_file = pathlib.Path(line.split("=")[-1].strip())
             if ext_input_file.exists() is False:
                 cd = pathlib.Path(f.name).parent
-                ext_input_file = cd / ext_input_file
+                ext_input_file = cd / ext_input_file.name
 
             # Read contents from external input file into mesh object
             out = read(ext_input_file)
